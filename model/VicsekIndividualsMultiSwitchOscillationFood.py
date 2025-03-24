@@ -1,5 +1,6 @@
 import pandas as pd
 import numpy as np
+import random
 
 from enums.EnumNeighbourSelectionMechanism import NeighbourSelectionMechanism
 from enums.EnumSwitchType import SwitchType
@@ -12,12 +13,15 @@ import services.ServiceMetric as ServiceMetric
 import services.ServiceThresholdEvaluation as ServiceThresholdEvaluation
 
 import model.SwitchInformation as SwitchInformation
-from model.VicsekIndividualsMultiSwitch  import VicsekWithNeighbourSelection
+from model.VicsekIndividualsMultiSwitchOscillation  import VicsekWithNeighbourSelectionOscillation
 
-class VicsekWithNeighbourSelectionOscillation(VicsekWithNeighbourSelection):
+from events.FoodEvent import FoodEvent
+
+class VicsekWithNeighbourSelectionOscillationFood(VicsekWithNeighbourSelectionOscillation):
 
     def __init__(self, domainSize, radius, noise, numberOfParticles, k, neighbourSelectionMechanism,
                  speed=1, switchSummary=None, events=None, degreesOfVision=2*np.pi, 
+                 maxFood=50, foodAppearanceProbability=0.1, foodEvents=[], foodSourceAmount=10,
                  activationTimeDelays=[], isActivationTimeDelayRelevantForEvents=False, colourType=None, 
                  thresholdEvaluationMethod=ThresholdEvaluationMethod.LOCAL_ORDER, updateIfNoNeighbours=True,
                  individualistic_stress_delta=0.01, social_stress_delta=0.01, stress_num_neighbours=2):
@@ -47,15 +51,19 @@ class VicsekWithNeighbourSelectionOscillation(VicsekWithNeighbourSelection):
                          switchSummary=switchSummary,
                          events=events,
                          degreesOfVision=degreesOfVision,
+                         individualistic_stress_delta=individualistic_stress_delta,
+                         social_stress_delta=social_stress_delta,
+                         stress_num_neighbours=stress_num_neighbours,
                          activationTimeDelays=activationTimeDelays,
                          isActivationTimeDelayRelevantForEvents=isActivationTimeDelayRelevantForEvents,
                          colourType=colourType,
                          thresholdEvaluationMethod=thresholdEvaluationMethod,
                          updateIfNoNeighbours=updateIfNoNeighbours)
 
-        self.individualistic_stress_delta = individualistic_stress_delta
-        self.social_stress_delta = social_stress_delta
-        self.stress_num_neighbours = stress_num_neighbours
+        self.maxFood = maxFood
+        self.foodAppearanceProbability = foodAppearanceProbability
+        self.foodEvents = foodEvents
+        self.foodSourceAmount = foodSourceAmount
 
     def getParameterSummary(self, asString=False):
         """
@@ -101,96 +109,50 @@ class VicsekWithNeighbourSelectionOscillation(VicsekWithNeighbourSelection):
             strPrep = [tup[0] + ": " + tup[1] for tup in summary.values()]
             return ", ".join(strPrep)
         return summary
-     
-    def getDecisions(self, t, neighbours, thresholdEvaluationChoiceValues, previousthresholdEvaluationChoiceValues, switchType, switchTypeValues, blocked, stressLevels):
+
+    def handleFoodEvents(self, t, positions, speeds, hungerLevels):
         """
-        Computes whether the individual chooses to use option A or option B as its value based on the local order, 
-        the average previous local order and a threshold.
+        Handles all types of events.
 
         Params:
             - t (int): the current timestep
-            - thresholdEvaluationChoiceValues (array of floats): the local order from the point of view of every individual
-            - previousthresholdEvaluationChoiceValues of arrays of floats): the local order for every individual at every previous time step
-            - switchType (SwitchType): the property that the values are assigned to
-            - switchTypeValues (array of ints): the current switchTypeValue selection for every individual
-            - blocked (array of booleans): whether updates are possible
+            - positions (array of (x,y)-coordinates): the position of every particle at the current timestep
+            - orientations (array of (u,v)-coordinates): the orientation of every particle at the current timestep
+            - nsms (array of NeighbourSelectionMechanism): how every particle selects its neighbours at the current timestep
+            - ks (array of ints): how many neighbours each particle considers at the current timestep
+            - speeds (array of floats): how fast each particle moves at the current timestep
+            - activationTimeDelays (array of ints): how often a particle is ready to update its orientation
 
         Returns:
-            Numpy array containing the updated switchTypeValues for every individual for the given switchType.
+            Arrays containing the updates orientations, neighbour selecton mechanisms, ks, speeds, which particles are blocked from updating and the colours assigned to each particle.
         """
-        switchInfo = self.switchSummary.getBySwitchType(switchType)
-        switchDifferenceThresholdLower = switchInfo.lowerThreshold
-        switchDifferenceThresholdUpper = switchInfo.upperThreshold
 
-        prev = np.average(previousthresholdEvaluationChoiceValues[max(t-switchInfo.numberPreviousStepsForThreshold, 0):t+1], axis=0)
-
-        stressCorrectedEvaluationValues = thresholdEvaluationChoiceValues + stressLevels
-        oldWithNewOrderValues = np.where(((stressCorrectedEvaluationValues >= switchDifferenceThresholdUpper) & (prev <= switchDifferenceThresholdUpper) & (blocked != True)), np.full(len(switchTypeValues), switchInfo.getOrderValue()), switchTypeValues)
-        updatedSwitchValues = np.where(((stressCorrectedEvaluationValues <= switchDifferenceThresholdLower) & (prev >= switchDifferenceThresholdLower) & (blocked != True)), np.full(len(switchTypeValues), switchInfo.getDisorderValue()), oldWithNewOrderValues)
-        if self.updateIfNoNeighbours == False:
-            neighbour_counts = np.count_nonzero(neighbours, axis=1)
-            updatedSwitchValues = np.where((neighbour_counts <= 1), switchTypeValues, updatedSwitchValues)
-        return updatedSwitchValues
+        overallAffected = []
+        if self.foodEvents != None:
+                for event in self.foodEvents:
+                    speeds, hungerLevels, affected = event.check(self.numberOfParticles, t, positions, speeds, hungerLevels)
+                    overallAffected.append(affected)
+        # make sure that all affected particles have stopped and everyone else is moving
+        speeds = np.full(self.numberOfParticles, self.speed)
+        if len(self.foodEvents) > 0:
+            flat = np.array(list(set(np.array(np.array(overallAffected).nonzero()[1]).flatten())))
+            if len(flat) > 0:
+                speeds[flat] = 0
+        speeds = np.where(hungerLevels >= self.maxFood, self.speed, speeds)
+        return speeds, hungerLevels
     
-    def prepareSimulation(self, initialState, dt, tmax):
-        """
-        Prepares the simulation by initialising all necessary properties.
+    def updateFoodEvents(self):
+        if self.foodAppearanceProbability not in [None, 0]:
+            rand = random.random()
+            if rand < self.foodAppearanceProbability:
+                foodEvent = FoodEvent(startTimestep=self.t,
+                                      amount=self.foodSourceAmount,
+                                      domainSize=self.domainSize,
+                                      areas=[(random.random() * self.domainSize[0], random.random() * self.domainSize[1], self.radius)],
+                                      radius=self.radius,
+                                      stopMovement=True)
+                self.foodEvents.append(foodEvent)
 
-        Params:
-            - initialState (tuple of arrays) [optional]: A tuple containing the initial positions of all particles, their initial orientations and their initial switch type values
-            - dt (int) [optional]: time step
-            - tmax (int) [optional]: the total number of time steps of the experiment
-
-        Returns:
-            Arrays containing the positions, orientations, neighbour selection mechanisms, ks, speeds and time delays.
-        """
-         # Preparations and setting of parameters if they are not passed to the method
-        
-        if any(ele is None for ele in initialState):
-            positions, orientations = self.initializeState()
-        else:
-            positions, orientations = initialState
-
-        nsms, ks, speeds, activationTimeDelays = self.initialiseSwitchingValues()
-
-        stressLevels = np.zeros(self.numberOfParticles)
-
-        #print(f"t=pre, order={ServiceMetric.computeGlobalOrder(orientations)}")
-
-        if dt is None and tmax is not None:
-            dt = 1
-        
-        if tmax is None:
-            tmax = (10**3)*dt
-            dt = np.average(10**(-2)*(np.max(self.domainSize)/speeds))
-
-        self.tmax = tmax
-        self.dt = dt
-
-        # Initialisations for the loop and the return variables
-        self.numIntervals=int(tmax/dt+1)
-
-        self.thresholdEvaluationChoiceValuesHistory = []  
-        self.positionsHistory = np.zeros((self.numIntervals,self.numberOfParticles,len(self.domainSize)))
-        self.orientationsHistory = np.zeros((self.numIntervals,self.numberOfParticles,len(self.domainSize)))  
-        self.stressLevelsHistory = np.zeros((self.numIntervals,self.numberOfParticles))
-        self.switchTypeValuesHistory = {'nsms': [], 'ks': [], 'speeds': [], 'activationTimeDelays': []}
-        self.coloursHistory = self.numIntervals * [self.numberOfParticles * ['k']]
-
-        self.positionsHistory[0,:,:]=positions
-        self.orientationsHistory[0,:,:]=orientations
-        self.stressLevelsHistory[0,:]=stressLevels
-        self.appendSwitchValues(nsms, ks, speeds, activationTimeDelays)
-
-        return positions, orientations, nsms, ks, speeds, activationTimeDelays, stressLevels
-    
-    def updateStressLevels(self, stressLevels, neighbours):
-        neighbour_counts = np.count_nonzero(neighbours, axis=1)
-        if self.t % 5000 == 0:
-            print(f"t={self.t}: avg neighbours = {np.average(neighbour_counts)}")
-        stressLevels = np.where((neighbour_counts > self.stress_num_neighbours), stressLevels - self.social_stress_delta, stressLevels)
-        stressLevels = np.where((neighbour_counts < self.stress_num_neighbours), stressLevels + self.individualistic_stress_delta, stressLevels)
-        return stressLevels
 
     def simulate(self, initialState=(None, None, None), dt=None, tmax=None):
         """
@@ -208,10 +170,24 @@ class VicsekWithNeighbourSelectionOscillation(VicsekWithNeighbourSelection):
         """
        
         positions, orientations, nsms, ks, speeds, activationTimeDelays, stressLevels = self.prepareSimulation(initialState=initialState, dt=dt, tmax=tmax)
+        hungerLevels = np.full(self.numberOfParticles, self.maxFood)
+        alive = np.full(self.numberOfParticles, True)
+        self.hungerLevelHistory = np.zeros((self.numIntervals,self.numberOfParticles))
+        self.alivenessHistory = np.zeros((self.numIntervals,self.numberOfParticles))
+
+        self.hungerLevelHistory[0] = hungerLevels
+        self.alivenessHistory[0] = alive
+
+        everyoneDead = False
+
         if self.colourType == ColourType.EXAMPLE:
             self.exampleId = np.random.choice(self.numberOfParticles, 1)
         for t in range(self.numIntervals):
             self.t = t
+            previousHungerLevels = hungerLevels
+            
+
+            self.updateFoodEvents()
             # if t % 5000 == 0:
             #     print(f"t={t}/{self.tmax}")
             # if self.t % 100 == 0:
@@ -220,8 +196,12 @@ class VicsekWithNeighbourSelectionOscillation(VicsekWithNeighbourSelection):
             # all neighbours (including self)
             neighbours = ServiceVicsekHelper.getNeighboursWithLimitedVision(positions=positions, orientations=orientations, domainSize=self.domainSize,
                                                                             radius=self.radius, degreesOfVision=self.degreesOfVision)
+            neighbours = neighbours * np.array([alive]*self.numberOfParticles)
             stressLevels = self.updateStressLevels(stressLevels, neighbours)
             orientations, nsms, ks, speeds, blocked, self.colours = self.handleEvents(t, positions, orientations, nsms, ks, speeds, activationTimeDelays)
+            self.colours = np.where(alive, 'k', 'w')
+
+            speeds, hungerLevels = self.handleFoodEvents(t, positions, speeds, hungerLevels)
 
             if self.switchSummary != None:
                 thresholdEvaluationChoiceValues = ServiceThresholdEvaluation.getThresholdEvaluationValuesForChoice(thresholdEvaluationMethod=self.thresholdEvaluationMethod, positions=positions, orientations=orientations, neighbours=neighbours, domainSize=self.domainSize)
@@ -242,18 +222,27 @@ class VicsekWithNeighbourSelectionOscillation(VicsekWithNeighbourSelection):
             positions += self.dt*(orientations.T * speeds).T
             positions += -self.domainSize*np.floor(positions/self.domainSize)
 
+            # if an individual is not feeding, it gets more hungry at every timestep
+            reducedHungerLevels = hungerLevels - 0.1
+            hungerLevels = np.where(hungerLevels == previousHungerLevels, reducedHungerLevels, hungerLevels)
+
+            alive = np.where(hungerLevels > 0, True, False)
+
             self.positionsHistory[t,:,:]=positions
             self.orientationsHistory[t,:,:]=orientations
             self.stressLevelsHistory[t,:]=stressLevels
+            self.hungerLevelHistory[t,:]=hungerLevels
+            self.alivenessHistory[t,:]=alive
 
             self.appendSwitchValues(nsms, ks, speeds, activationTimeDelays)
-            if self.colourType != None:
-                self.coloursHistory[t] = self.colours
+            self.coloursHistory[t] = self.colours
 
+            if np.count_nonzero(alive) == 0 and everyoneDead == False:
+                everyoneDead = True
+                print(f"everyone is dead by timestep {t}")
+            
             # if t % 500 == 0:
             #     print(f"t={t}, th={self.thresholdEvaluationMethod.name}, order={ServiceMetric.computeGlobalOrder(orientations)}")
             
-        if self.colourType == None:
-            return (self.dt*np.arange(self.numIntervals), self.positionsHistory, self.orientationsHistory), self.switchTypeValuesHistory, self.stressLevelsHistory
-        else:
-            return (self.dt*np.arange(self.numIntervals), self.positionsHistory, self.orientationsHistory), self.switchTypeValuesHistory, self.coloursHistory, self.stressLevelsHistory
+        print(f"num foodev: {len(self.foodEvents)}")
+        return (self.dt*np.arange(self.numIntervals), self.positionsHistory, self.orientationsHistory), self.switchTypeValuesHistory, self.coloursHistory, self.stressLevelsHistory, self.hungerLevelHistory, self.alivenessHistory, self.foodEvents

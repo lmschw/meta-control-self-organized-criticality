@@ -7,7 +7,9 @@ import pandas as pd
 Service contains static methods to save and load models to/from json files.
 """
 
-def saveModel(simulationData, path="sample.json", modelParams=None, saveInterval=1, switchValues={'nsms': [], 'ks': [], 'speeds': [], 'activationTimeDelays': []}, colours=None):
+def saveModel(simulationData, path="sample.json", modelParams=None, saveInterval=1, 
+              switchValues={'nsms': [], 'ks': [], 'speeds': [], 'activationTimeDelays': []}, 
+              colours=None, stressLevels=None, hungerLevels=None, alive=None, foodEvents=None):
     """
     Saves a model trained by the Viscek simulator implementation.
 
@@ -32,6 +34,14 @@ def saveModel(simulationData, path="sample.json", modelParams=None, saveInterval
         dict["switchValues"] = {k : np.array(v).tolist() for k,v in vals.items()} # deal with np.array instances in the values
     if colours:
         dict["colours"] = [np.array(cols).tolist() for cols in colours]
+    if stressLevels:
+        dict["stressLevels"] = [np.array(levels).tolist() for levels in stressLevels]
+    if hungerLevels:
+        dict["hungerLevels"] = [np.array(levels).tolist() for levels in hungerLevels]
+    if alive:
+        dict["alive"] = [np.array(a).tolist() for a in alive]
+    if foodEvents:
+        dict["foodEvents"] = [event.getParameterSummary() for event in foodEvents]
     saveDict(path, dict, modelParams)
 
 
