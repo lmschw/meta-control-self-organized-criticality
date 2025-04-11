@@ -12,7 +12,7 @@ import model.SwitchInformation as SwitchInformation
 class VicsekWithNeighbourSelection():
 
     def __init__(self, domainSize, radius, noise, numberOfParticles,
-                 speed=1, use_single_speed=True, degreesOfVision=2*np.pi, occlusion_active=False, 
+                 speed=1, use_single_speed=True, vary_speed_throughout=False, degreesOfVision=2*np.pi, occlusion_active=False, 
                  returnHistories=True, logPath=None, logInterval=1):
         """
         Params:
@@ -34,6 +34,7 @@ class VicsekWithNeighbourSelection():
         self.numberOfParticles = numberOfParticles
         self.speed = speed
         self.use_single_speed = use_single_speed
+        self.vary_speed_throughout = vary_speed_throughout
         self.degreesOfVision = degreesOfVision
         self.occlusion_active = occlusion_active
 
@@ -95,6 +96,14 @@ class VicsekWithNeighbourSelection():
             An array with the noise to be added to each individual
         """
         return np.random.normal(scale=self.noise, size=(self.numberOfParticles, len(self.domainSize)))
+    
+    def generateSpeeds(self, speeds):
+        if self.vary_speed_throughout == False:
+            return speeds
+        if self.use_single_speed:
+            speed = np.random.normal(self.speed, self.noise, 1)
+            return np.full(self.numberOfParticles, speed)
+        return np.random.normal(self.speed, scale=self.noise, size=self.numberOfParticles)
 
     def calculateMeanOrientations(self, orientations, neighbours):
         """
@@ -154,8 +163,8 @@ class VicsekWithNeighbourSelection():
         else:
             positions, orientations = initialState
 
-        # TODO implement speed generation
         speeds = np.full(self.numberOfParticles, self.speed)
+        speeds = self.generateSpeeds(speeds)
 
         #print(f"t=pre, order={ServiceMetric.computeGlobalOrder(orientations)}")
 
@@ -224,6 +233,8 @@ class VicsekWithNeighbourSelection():
                                                                             radius=self.radius, fov=self.degreesOfVision, occlusion_active=self.occlusion_active)
 
             orientations = self.computeNewOrientations(neighbours, orientations)
+
+            speeds = self.generateSpeeds(speeds)
 
             positions += self.dt*(orientations.T * speeds).T
             positions += -self.domainSize*np.floor(positions/self.domainSize)
