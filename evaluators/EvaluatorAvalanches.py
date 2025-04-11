@@ -5,27 +5,31 @@ import services.ServiceMetric as sm
 
 class EvaluatorAvalanches:
 
-    def __init__(self, orientations, orderThreshold=0.8, savePath=None):
+    def __init__(self, orientations, orderThreshold=0.8, savePath=None, show=False):
         self.orientations = orientations
         self.orderThreshold = orderThreshold
         self.savePath = savePath
+        self.show = show
 
     def evaluateAvalanches(self):
         avalanches = self.measureAvalanches()
         n = len(avalanches)
-        durationMin = np.min(avalanches[:,2])
-        durationAvg = np.average(avalanches[:,2])
-        durationMax = np.max(avalanches[:,2])
-        magnitudeMin = self.orderThreshold-np.max(avalanches[:,4])
-        magnitudeAvg = self.orderThreshold-np.average(avalanches[:,4])
-        magnitudeMax = self.orderThreshold-np.min(avalanches[:,4])
-
         print(f"Number of avalanches: {n}")
-        print(f"Duration avalanches: min={durationMin}, avg={durationAvg}, max={durationMax}")
-        print(f"Magnitude: min={magnitudeMin}, avg={magnitudeAvg}, max={magnitudeMax}")
 
-        self.plotProbabilityDistributionDurations(avalanches[:,2])
-        return avalanches, n, (durationMin, durationAvg, durationMax), (magnitudeMin, magnitudeAvg, magnitudeMax)
+        if n > 0:
+            durationMin = np.min(avalanches[:,2])
+            durationAvg = np.average(avalanches[:,2])
+            durationMax = np.max(avalanches[:,2])
+            magnitudeMin = self.orderThreshold-np.max(avalanches[:,4])
+            magnitudeAvg = self.orderThreshold-np.average(avalanches[:,4])
+            magnitudeMax = self.orderThreshold-np.min(avalanches[:,4])
+
+            print(f"Duration avalanches: min={durationMin}, avg={durationAvg}, max={durationMax}")
+            print(f"Magnitude: min={magnitudeMin}, avg={magnitudeAvg}, max={magnitudeMax}")
+
+            self.plotProbabilityDistributionDurations(avalanches[:,2])
+            return avalanches, n, (durationMin, durationAvg, durationMax), (magnitudeMin, magnitudeAvg, magnitudeMax)
+        return avalanches, n, (None, None, None), (None, None, None)
 
     def measureAvalanches(self):
         avalanches = []
@@ -61,7 +65,8 @@ class EvaluatorAvalanches:
             plt.savefig(f"{self.savePath}.pdf")
             plt.savefig(f"{self.savePath}.jpeg")
 
-        plt.show()
+        if self.show:
+            plt.show()
 
 
 

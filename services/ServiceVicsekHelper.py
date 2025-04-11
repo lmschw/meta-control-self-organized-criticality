@@ -42,12 +42,10 @@ def getNeighbours(positions, domainSize, radius):
     rij2 = getPositionDifferences(positions, domainSize)
     return (rij2 <= radius**2)
 
-def getNeighboursWithLimitedVision(positions, orientations, domainSize, radius, degreesOfVision):
+def getNeighboursWithLimitedVision(positions, orientations, domainSize, radius, fov=2*np.pi, agent_radius=1, occlusion_active=False):
     candidates = getNeighbours(positions=positions, domainSize=domainSize, radius=radius)
-    minAngles, maxAngles = ServiceVision.determineMinMaxAngleOfVision(orientations=orientations, degreesOfVision=degreesOfVision)
-    inFieldOfVision = ServiceVision.isInFieldOfVision(positions=positions, minAngles=minAngles, maxAngles=maxAngles)
-
-    combined = candidates & inFieldOfVision
+    visibles = ServiceVision.compute_visibility_mask(positions=positions, orientations=orientations, fov=fov, view_distance=radius, agent_radius=agent_radius, occlusion_active=occlusion_active)
+    combined = candidates & visibles
     np.fill_diagonal(combined, True)
     return combined
 
